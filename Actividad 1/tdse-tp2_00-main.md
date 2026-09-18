@@ -1,22 +1,35 @@
-# Análisis de Código Fuente STM32
+# Descripción de la solución de COMA Electronics
 
-A continuación se detalla el funcionamiento del código fuente correspondiente al arranque y la lógica principal del microcontrolador, así como la evolución de sus variables de tiempo y reloj.
+De acuerdo con la referencia "3.1.- TA134 - TdSE - 1er Proyecto", la solución de COMA Electronics se estructura en un ecosistema integral conocido como **Intelligent Parking Management System**. Este consta de los siguientes elementos principales:
 
-## 1. Funcionamiento General del Código
+*   **Parking System Server:** Servidor central encargado de la gestión general del sistema.
+*   **Entry Machine & Exit Machine:** Terminales ubicadas en los accesos de entrada y salida, con diversas opciones de configuración disponibles según la necesidad del cliente.
+*   **Toll Computer / Automatic Pay Station:** Estaciones dedicadas exclusivamente al cobro y validación de los pagos.
 
-El flujo de ejecución del programa avanza a través de los tres archivos de la siguiente manera:
+## Automated Parking System (Flujo del Sistema)
+Dentro de este ecosistema funciona el flujo automatizado, cuyo comportamiento estándar es el siguiente:
 
-*   **Arranque en ensamblador (`startup_stm32f103rbtx.s`):** Todo comienza en la rutina `Reset_Handler` inmediatamente después de encender o reiniciar el microcontrolador. Este código llama a la función `SystemInit` para establecer la configuración base del reloj. A continuación, prepara la memoria RAM copiando los valores iniciales de la sección `.data` desde la memoria Flash y llenando con ceros la sección `.bss` mediante el bucle `FillZerobss`. Finalmente, llama a la inicialización de la librería en C y salta a la función principal `main` mediante la instrucción `bl main`.
-*   **Inicialización y Lógica Principal (`main.c`):** Al ingresar a la función `main()`, el programa ejecuta `HAL_Init()`, lo cual reinicia todos los periféricos e inicializa la interfaz Flash y el temporizador SysTick. Inmediatamente después, invoca a `SystemClock_Config()` para configurar la velocidad definitiva de los relojes del sistema. Luego inicializa los puertos GPIO y la comunicación serial USART2, para posteriormente ejecutar la inicialización de la aplicación a través de `app_init()`. Finalmente, el microcontrolador entra en el bucle infinito `while (1)`, donde ejecuta cíclicamente la rutina `app_update()`.
-*   **Manejo de Interrupciones (`stm32f1xx_it.c`):** Este archivo aloja las rutinas de servicio de interrupción (ISR) a las que el procesador salta cuando ocurre un evento de hardware. Contiene manejadores como `SysTick_Handler`, que llama a `HAL_IncTick()` para actualizar el contador de tiempo base de las librerías HAL. También atiende interrupciones externas, como `EXTI15_10_IRQHandler`, la cual llama al manejador de GPIO para el pin del botón `B1_Pin`.
+1. El vehículo arriba a la terminal de entrada (*Entry Machine*).
+2. El conductor presiona un botón, desencadenando la emisión de un ticket o tarjeta que contiene un número de serie, la fecha y la hora. Simultáneamente, se envía una señal para abrir la barrera y permitir el ingreso del vehículo.
+3. Antes de retirarse del establecimiento, el cliente debe llevar su ticket a un punto de pago central o estación automática para abonar y validarlo.
+4. Finalmente, al llegar a la terminal de salida (*Exit Machine*), el sistema lee el ticket validado y envía la orden a la barrera para que se abra, permitiendo la salida del vehículo.
 
-## 2. Evolución de la variable `SystemCoreClock`
+## Parking Ticket Dispenser Machine (Entry)
+El foco de este proyecto se centra en la terminal de entrada. El hardware estipulado para esta máquina incluye:
 
-*   **En el `Reset_Handler`:** Durante los primeros instantes de ejecución antes de llegar a C, el sistema funciona con el reloj interno por defecto (usualmente el HSI a 8 MHz para la familia F1).
-*   **Durante `main()`:** Al ejecutarse la función `SystemClock_Config()`, el código activa el oscilador interno (HSI) y enciende el PLL. El PLL se configura utilizando el HSI dividido por 2 como fuente de entrada y aplicando un multiplicador de 16 (`RCC_PLL_MUL16`). Finalmente, se selecciona el reloj generado por el PLL como la fuente principal del sistema (`RCC_SYSCLKSOURCE_PLLCLK`). Esto modifica drásticamente la frecuencia de operación, momento en el cual la variable `SystemCoreClock` (utilizada por las librerías CMSIS para rastrear la velocidad) pasa a adoptar la frecuencia final calculada para el microcontrolador.
+*   Pantalla LCD de 7 pulgadas.
+*   Lector de tarjetas y botón de ayuda.
+*   Ranura dispensadora y botón para solicitar el ticket.
+*   Sistema de avisos por voz (*Voice prompt*).
+*   Intercomunicador (opcional).
+*   A nivel de infraestructura de carril, se integra con una cámara motorizada con luz automática, una barrera de alta velocidad (ambas activables mediante un disparador por radar) y un display LED para indicar la cantidad de cupos vacantes.
 
-## 3. Evolución de la variable `SysTick`
+## Arquitectura de Implementación
+Para llevar a cabo el control de esta terminal mediante software embebido, se utiliza una arquitectura modular diseñada para evitar bloqueos y asegurar un comportamiento concurrente. Se divide en tres etapas funcionales:
 
-*   **En el `Reset_Handler`:** El hardware del temporizador SysTick se encuentra desactivado y no genera interrupciones.
-*   **Durante la inicialización en `main()`:** Al ejecutarse la instrucción `HAL_Init()`, el hardware del SysTick es configurado y encendido para generar una interrupción de forma periódica.
-*   **En el bucle `while (1)`:** A partir de la inicialización, independientemente de lo que esté ejecutando el bucle infinito de `main.c`, el hardware interrumpe al procesador periódicamente para saltar a la función `SysTick_Handler()` en el archivo `stm32f1xx_it.c`. Dentro de este manejador, la llamada a `HAL_IncTick()` incrementa la variable interna que lleva la cuenta del tiempo transcurrido desde el encendido del sistema.
+1.  **Escrutar (Scrutinize):** Módulo encargado de monitorear los sensores y entradas digitales (cámara, botón de ticket, bobina sensora).
+2.  **Procesar (Process):** Módulo central que recibe la información del entorno, ejecuta la máquina de estados lógicos y toma decisiones.
+3.  **Actuar (Act):** Módulo responsable de traducir las decisiones lógicas en modificaciones sobre las salidas digitales o actuadores (pantalla, impresora, motor de la barrera y notificaciones al servidor).
+
+**Sincronización y Ejecución:** 
+Los tres módulos son independientes y se comunican de forma exclusiva a través del intercambio de mensajes. Todo el sistema se rige bajo un esquema de ejecución cíclica de tareas no bloqueantes (*Update by Time Code*), donde cada máquina de estados es evaluada estrictamente cada 1 milisegundo, garantizando que el uso del procesador sea equitativo y evitando cuelgues del sistema.
