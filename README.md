@@ -4,6 +4,6 @@
 ### Responsable de la entrega: Itria Franco 
 | Padrón | Apellidos, Nombres | Fecha | Deadline |
 | :----- | :--------------------- | :------: | :-------: |
-| 112109 | Santander, Cristian | | Semana 06 |
-| 110191 | Itria, Franco | | Semana 06 |
-| 111546 | Flores Quiroga, Tobias | | Semana 06 |
+| 112109 | Santander, Cristian | 18/09 | Semana 06 |
+| 110191 | Itria, Franco | 18/09 | Semana 06 |
+| 111546 | Flores Quiroga, Tobias | 18/09 | Semana 06 |
